@@ -159,7 +159,10 @@ struct ChatCrypto {
                     inBuffer.baseAddress,
                     input.count,
                     outBuffer.baseAddress,
-                    output.count,
+                    // Taille lue sur le tampon et non sur « output » : accéder à
+                    // output.count ici serait un accès concurrent à la variable
+                    // dont la fermeture détient déjà l'accès exclusif.
+                    outBuffer.count,
                     &moved
                 )
             }

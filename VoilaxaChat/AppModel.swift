@@ -51,7 +51,7 @@ final class AppModel: ObservableObject {
         do {
             let client = APIClient(endpoint: url)
             let bootstrap = try await client.bootstrap()
-            guard let kdf = bootstrap.kdf else { throw APIClient.ClientError.malformedResponse }
+            guard bootstrap.kdf != nil else { throw APIClient.ClientError.malformedResponse }
 
             let login = try await client.login(password: accessPassword)
             guard login.authenticated == true, let loginKDF = login.kdf ?? bootstrap.kdf else {
