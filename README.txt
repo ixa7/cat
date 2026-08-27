@@ -1,3 +1,18 @@
+VoilaxaChat iOS
+================
+
+Serveur fixe : https://voilaxa.com/chat.php
+
+Parcours de connexion :
+1. Mot de passe d'accès du serveur (écran séparé).
+2. Pseudo + Clé de chiffrement, comme sur la version web.
+3. Liste des rooms puis chat.
+
+L'URL du serveur n'est ni demandée ni enregistrée dans UserDefaults.
+Le mot de passe d'accès est effacé après authentification.
+La phrase de chiffrement est dérivée localement puis effacée du champ ; la clé dérivée reste uniquement en mémoire tant que l'app est active.
+Le passage en arrière-plan verrouille l'app et efface l'état sensible.
+
 VOILAXA CHAT iOS
 
 1. Remplace chat.php sur ton serveur par le chat.php fourni séparément.

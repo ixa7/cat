@@ -4,7 +4,7 @@ Client de chat chiffré pour iPhone, en SwiftUI natif. Il parle au `chat.php`
 du serveur, chiffre et déchiffre sur l'appareil, et ne conserve ni le mot de
 passe d'accès ni la clé en mémoire persistante.
 
-L'application s'affiche sous le nom **Notes** sur l'écran d'accueil.
+L'application s'affiche sous le nom **VoilaChat** sur l'écran d'accueil.
 
 ## Construire l'IPA sans Mac
 

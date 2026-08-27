@@ -3,7 +3,9 @@ import Security
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? "https://example.com/chat.php"
+    // Le serveur est volontairement fixe : l'utilisateur ne peut pas le modifier.
+    private static let endpoint = URL(string: "https://voilaxa.com/chat.php")!
+
     @Published var accessPassword = ""
     @Published var pseudoInput = ""
     @Published var encryptionPassphrase = ""
@@ -14,10 +16,12 @@ final class AppModel: ObservableObject {
     @Published var errorMessage = ""
     @Published var statusMessage = ""
     @Published var busy = false
+    @Published private(set) var accessAuthenticated = false
     @Published private(set) var authenticated = false
 
     private var api: APIClient?
     private var crypto: ChatCrypto?
+    private var pendingKDF: KDFConfig?
     private var pseudo = ""
     private var userID = ""
     private var roomCount = 11
@@ -30,18 +34,65 @@ final class AppModel: ObservableObject {
         return currentRoom.id != unclearableRoom
     }
 
-    func connect() async {
+    /// Étape 1 : mot de passe qui protège chat.php et ses API.
+    func loginAccess() async {
         guard !busy else { return }
         errorMessage = ""
         statusMessage = ""
 
-        let trimmedPseudo = pseudoInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPseudo.isEmpty, !encryptionPassphrase.isEmpty, !accessPassword.isEmpty else {
-            errorMessage = "Serveur, mot de passe d’accès, pseudo et clé de chiffrement sont requis."
+        guard !accessPassword.isEmpty else {
+            errorMessage = "Mot de passe d’accès requis."
             return
         }
-        guard let url = URL(string: serverURL), url.scheme?.lowercased() == "https" else {
-            errorMessage = "Utilise une adresse HTTPS complète vers chat.php."
+
+        busy = true
+        defer { busy = false }
+
+        let client = APIClient(endpoint: Self.endpoint)
+        do {
+            let bootstrap = try await client.bootstrap()
+            let login = try await client.login(password: accessPassword)
+            guard login.authenticated == true,
+                  let kdf = login.kdf ?? bootstrap.kdf else {
+                throw APIClient.ClientError.malformedResponse
+            }
+
+            api?.close()
+            api = client
+            pendingKDF = kdf
+            roomCount = login.roomCount ?? bootstrap.roomCount ?? 11
+            unclearableRoom = login.unclearableRoom ?? bootstrap.unclearableRoom ?? "room11"
+            maxMessageChars = login.maxMessageChars ?? bootstrap.maxMessageChars ?? 4000
+            accessAuthenticated = true
+
+            // Le mot de passe d'accès n'a plus besoin de rester dans le modèle.
+            accessPassword = ""
+            errorMessage = ""
+            statusMessage = ""
+        } catch {
+            client.close()
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Étape 2 : exactement le principe de la page web "Pseudo + Clé".
+    /// La clé de chiffrement est dérivée localement et n'est jamais envoyée à PHP.
+    func enterChat() async {
+        guard !busy, accessAuthenticated, api != nil else { return }
+        errorMessage = ""
+        statusMessage = ""
+
+        let trimmedPseudo = pseudoInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPseudo.isEmpty else {
+            errorMessage = "Pseudo requis."
+            return
+        }
+        guard !encryptionPassphrase.isEmpty else {
+            errorMessage = "Clé requise."
+            return
+        }
+        guard let kdf = pendingKDF else {
+            errorMessage = "Configuration cryptographique indisponible. Reconnecte-toi."
             return
         }
 
@@ -49,35 +100,43 @@ final class AppModel: ObservableObject {
         defer { busy = false }
 
         do {
-            let client = APIClient(endpoint: url)
-            let bootstrap = try await client.bootstrap()
-            guard bootstrap.kdf != nil else { throw APIClient.ClientError.malformedResponse }
-
-            let login = try await client.login(password: accessPassword)
-            guard login.authenticated == true, let loginKDF = login.kdf ?? bootstrap.kdf else {
-                throw APIClient.ClientError.malformedResponse
-            }
-
-            let derivedCrypto = try ChatCrypto(passphrase: encryptionPassphrase, kdf: loginKDF)
-            api = client
+            let derivedCrypto = try ChatCrypto(passphrase: encryptionPassphrase, kdf: kdf)
             crypto = derivedCrypto
             pseudo = trimmedPseudo
             userID = Self.randomHex(bytes: 16)
-            roomCount = login.roomCount ?? bootstrap.roomCount ?? 11
-            unclearableRoom = login.unclearableRoom ?? bootstrap.unclearableRoom ?? "room11"
-            maxMessageChars = login.maxMessageChars ?? bootstrap.maxMessageChars ?? 4000
             authenticated = true
 
-            UserDefaults.standard.set(serverURL, forKey: "serverURL")
-            accessPassword = ""
+            // La phrase secrète saisie n'est pas conservée après dérivation.
             encryptionPassphrase = ""
-            statusMessage = "Connecté. La clé de chiffrement reste en mémoire uniquement."
+            statusMessage = ""
             await refreshRooms()
             startRoomPolling()
         } catch {
-            api?.close()
-            api = nil
             crypto = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Bouton "Test" de l'écran Pseudo/Clé, analogue à la version web.
+    func testConnection() async {
+        guard !busy, accessAuthenticated, let api else { return }
+        errorMessage = ""
+        statusMessage = "Test en cours..."
+        busy = true
+        defer { busy = false }
+
+        do {
+            _ = try await api.rooms()
+            if encryptionPassphrase.isEmpty {
+                statusMessage = "OK : HTTPS + API PHP accessibles."
+            } else if let kdf = pendingKDF {
+                _ = try ChatCrypto(passphrase: encryptionPassphrase, kdf: kdf)
+                statusMessage = "OK : HTTPS + API PHP + chiffrement local."
+            } else {
+                statusMessage = "OK : HTTPS + API PHP accessibles."
+            }
+        } catch {
+            statusMessage = ""
             errorMessage = error.localizedDescription
         }
     }
@@ -174,12 +233,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Quitter depuis les rooms : détruit aussi la session d'accès côté PHP.
     func logout() async {
         pollTask?.cancel()
         if let api { await api.logout() }
         clearSensitiveState()
     }
 
+    /// Quitter depuis l'écran Pseudo/Clé avant d'entrer dans les rooms.
+    func cancelAccessSession() async {
+        pollTask?.cancel()
+        if let api { await api.logout() }
+        clearSensitiveState()
+    }
+
+    /// En arrière-plan, on oublie immédiatement session, clé dérivée et contenus clairs.
     func lockImmediately() {
         pollTask?.cancel()
         api?.close()
@@ -189,15 +257,19 @@ final class AppModel: ObservableObject {
     private func clearSensitiveState() {
         api = nil
         crypto = nil
+        pendingKDF = nil
         pseudo = ""
         userID = ""
         accessPassword = ""
         encryptionPassphrase = ""
+        pseudoInput = ""
         messageDraft = ""
         messages = []
         rooms = []
         currentRoom = nil
+        accessAuthenticated = false
         authenticated = false
+        errorMessage = ""
         statusMessage = ""
     }
 

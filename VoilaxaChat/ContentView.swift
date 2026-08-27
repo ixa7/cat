@@ -7,8 +7,10 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             Group {
-                if !model.authenticated {
-                    LoginView()
+                if !model.accessAuthenticated {
+                    AccessLoginView()
+                } else if !model.authenticated {
+                    IdentityLoginView()
                 } else if model.currentRoom != nil {
                     ChatView()
                 } else {
@@ -27,50 +29,106 @@ struct ContentView: View {
     }
 }
 
-private struct LoginView: View {
+/// Premier écran : équivalent de la porte d'accès PHP de la version web.
+private struct AccessLoginView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Serveur") {
-                    TextField("https://exemple.com/chat.php", text: $model.serverURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
+                Section {
+                    Text("Ce mot de passe protège l’accès au chat. La clé de chiffrement des messages sera demandée ensuite et restera sur l’iPhone.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
                     SecureField("Mot de passe d’accès", text: $model.accessPassword)
+                        .textContentType(.password)
+                        .submitLabel(.go)
+                        .onSubmit {
+                            Task { await model.loginAccess() }
+                        }
                 }
-                Section("Chiffrement") {
-                    TextField("Pseudo", text: $model.pseudoInput)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField("Clé de chiffrement", text: $model.encryptionPassphrase)
-                }
+
                 Section {
                     Button {
-                        Task { await model.connect() }
+                        Task { await model.loginAccess() }
                     } label: {
                         HStack {
                             Spacer()
-                            if model.busy { ProgressView() } else { Text("Entrer") }
+                            if model.busy { ProgressView() } else { Text("Ouvrir") }
                             Spacer()
                         }
                     }
-                    .disabled(model.busy)
+                    .disabled(model.busy || model.accessPassword.isEmpty)
                 }
+
+                if !model.errorMessage.isEmpty {
+                    Section { Text(model.errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("Accès au chat")
+        }
+    }
+}
+
+/// Deuxième écran : même logique que la page web "Pseudo + Clé".
+private struct IdentityLoginView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Pseudo", text: $model.pseudoInput)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+
+                    SecureField("Clé", text: $model.encryptionPassphrase)
+                        .textContentType(.password)
+                        .submitLabel(.go)
+                        .onSubmit {
+                            Task { await model.enterChat() }
+                        }
+                }
+
+                Section {
+                    HStack(spacing: 12) {
+                        Button("Entrer") {
+                            Task { await model.enterChat() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.busy || model.pseudoInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.encryptionPassphrase.isEmpty)
+
+                        Button("Test") {
+                            Task { await model.testConnection() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.busy)
+                    }
+                }
+
+                Section {
+                    Text("Cette clé sert aux 11 rooms. Avec une mauvaise clé, les messages v6 produiront du texte brouillé, comme sur la version web.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 if !model.statusMessage.isEmpty {
                     Section { Text(model.statusMessage).foregroundStyle(.secondary) }
                 }
                 if !model.errorMessage.isEmpty {
                     Section { Text(model.errorMessage).foregroundStyle(.red) }
                 }
-                Section {
-                    Text("La clé de chiffrement n’est pas enregistrée. L’application se verrouille lorsqu’elle passe en arrière-plan.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
             }
             .navigationTitle("Notes")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Quitter") { Task { await model.cancelAccessSession() } }
+                }
+            }
         }
     }
 }
