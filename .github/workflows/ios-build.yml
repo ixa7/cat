@@ -1,0 +1,55 @@
+name: Build iOS IPA
+
+# Compile VoilaxaChat sur un Mac cloud GitHub. L'IPA produit est NON SIGNÉ :
+# c'est Sideloadly (Windows) ou Sideloader (Linux) qui le signe avec ton
+# Apple ID au moment de l'installation sur l'iPhone.
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Version d'Xcode
+        run: xcodebuild -version
+
+      - name: Build Xcode (sans signature)
+        run: |
+          xcodebuild \
+            -project VoilaxaChat.xcodeproj \
+            -scheme VoilaxaChat \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Empaquetage IPA
+        run: |
+          APP_PATH="$RUNNER_TEMP/build/Build/Products/Release-iphoneos/VoilaxaChat.app"
+          test -d "$APP_PATH"
+          mkdir -p "$RUNNER_TEMP/payload/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/payload/Payload/"
+          # Réserve de la place dans __LINKEDIT : sans ça, la signature ajoutée
+          # à l'installation dépasse le vmsize du segment et iOS refuse de
+          # lancer l'app (« __LINKEDIT filesize exceeds vmsize »).
+          python3 tools/fix-linkedit.py "$RUNNER_TEMP/payload/Payload/VoilaxaChat.app"
+          cd "$RUNNER_TEMP/payload"
+          zip -qry "$GITHUB_WORKSPACE/VoilaxaChat.ipa" Payload
+          ls -lh "$GITHUB_WORKSPACE/VoilaxaChat.ipa"
+
+      - name: Publication de l'IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoilaxaChat-ipa
+          path: VoilaxaChat.ipa
+          retention-days: 30
