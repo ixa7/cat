@@ -164,16 +164,20 @@ private struct RoomsView: View {
 private struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showClearConfirm = false
+    @FocusState private var messageFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 8) {
                             ForEach(model.messages) { message in
                                 HStack {
                                     if message.mine { Spacer(minLength: 48) }
+
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(message.author)
                                             .font(.caption2)
@@ -182,50 +186,83 @@ private struct ChatView: View {
                                             .textSelection(.enabled)
                                     }
                                     .padding(10)
-                                    .background(message.readable ? Color.secondary.opacity(0.16) : Color.secondary.opacity(0.08))
+                                    .background(
+                                        message.readable
+                                            ? Color.secondary.opacity(0.16)
+                                            : Color.secondary.opacity(0.08)
+                                    )
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
+
                                     if !message.mine { Spacer(minLength: 48) }
                                 }
                                 .id(message.id)
                             }
                         }
-                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .padding(.horizontal)
+                        .padding(.vertical, 10)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Un glissement vers le bas peut rabattre le clavier.
+                    .scrollDismissesKeyboard(.interactively)
+                    // Un tap dans la conversation ferme aussi le clavier.
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        messageFieldFocused = false
                     }
                     .onChange(of: model.messages.count) { _ in
                         if let last = model.messages.last?.id {
-                            withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                            withAnimation {
+                                proxy.scrollTo(last, anchor: .bottom)
+                            }
                         }
                     }
                 }
-
-                Divider()
-                HStack(alignment: .bottom) {
-                    TextField("Message", text: $model.messageDraft, axis: .vertical)
-                        .lineLimit(1...5)
-                        .textFieldStyle(.roundedBorder)
-                    Button {
-                        Task { await model.sendMessage() }
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill").font(.title2)
-                    }
-                    .disabled(model.messageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .padding()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // La zone de saisie reste collée au bas de l'écran et suit le clavier.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                composer
             }
             .navigationTitle(model.currentRoom?.title ?? "Room")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Rooms") { Task { await model.closeRoom() } }
-                }
-                if model.canClearCurrentRoom {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Vider", role: .destructive) { showClearConfirm = true }
+                    Button("Rooms") {
+                        messageFieldFocused = false
+                        Task { await model.closeRoom() }
                     }
                 }
+
+                if model.canClearCurrentRoom {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Vider", role: .destructive) {
+                            messageFieldFocused = false
+                            showClearConfirm = true
+                        }
+                    }
+                }
+
+                // Barre située juste au-dessus du clavier iOS.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Text("🌐 AZERTY / QWERTY")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Fermer") {
+                        messageFieldFocused = false
+                    }
+                    .fontWeight(.semibold)
+                }
             }
-            .confirmationDialog("Vider cette room pour tout le monde ?", isPresented: $showClearConfirm, titleVisibility: .visible) {
-                Button("Vider", role: .destructive) { Task { await model.clearCurrentRoom() } }
+            .confirmationDialog(
+                "Vider cette room pour tout le monde ?",
+                isPresented: $showClearConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Vider", role: .destructive) {
+                    Task { await model.clearCurrentRoom() }
+                }
                 Button("Annuler", role: .cancel) {}
             }
             .overlay(alignment: .top) {
@@ -239,5 +276,37 @@ private struct ChatView: View {
                 }
             }
         }
+    }
+
+    private var composer: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Message", text: $model.messageDraft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($messageFieldFocused)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
+                    .submitLabel(.send)
+
+                Button {
+                    Task { await model.sendMessage() }
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 30))
+                }
+                .disabled(
+                    model.messageDraft
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                )
+                .accessibilityLabel("Envoyer")
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+        }
+        .background(.ultraThinMaterial)
     }
 }

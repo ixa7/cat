@@ -31,3 +31,10 @@ L'app :
 - efface les secrets de sa mémoire logique lorsqu'elle passe en arrière-plan.
 
 IMPORTANT : un IPA installable doit être signé par Apple avec ton certificat/profil de provisioning. Le projet ne contient volontairement aucun certificat ni secret Apple.
+
+MISE A JOUR INTERFACE IPHONE
+- Le Launch Screen est maintenant genere par iOS afin d'eviter le mode de compatibilite/letterboxing sur les iPhone modernes.
+- La conversation occupe tout l'espace disponible.
+- Le champ de saisie reste colle au bas de l'ecran via safeAreaInset.
+- Le clavier peut etre ferme en faisant glisser la conversation, en touchant la conversation, ou via le bouton "Fermer" au-dessus du clavier.
+- AZERTY/QWERTY reste gere par le clavier systeme iOS : appuyer/maintenir le bouton globe pour choisir un clavier installe dans Reglages > General > Clavier > Claviers.
